@@ -33,6 +33,12 @@ use Sabre\DAV\Exception\NotFound;
 use Sabre\DAV\ICollection;
 use OCA\DAV\Connector\Sabre\Node;
 
+/**
+ * Sabre tree of nodes.
+ *
+ * Provides a shortcut when accessing the "files/" subtree to avoid
+ * having to walk through every node and trigger unnecessary extra queries.
+ */
 class Tree extends \Sabre\DAV\Tree {
 
 	/**
@@ -64,75 +70,6 @@ class Tree extends \Sabre\DAV\Tree {
 			return parent::getNodeForPath($path);
 		}
 
-		// shortcut to file nodes to avoid traversing every parent because
-		// this would trigger additional filecache queries and also additional
-		// locking of parent nodes and potential rescan in the
-		// case of external storages with update detection
-		$sections = explode('/', $path);
-		array_shift($sections);
-		$userId = array_shift($sections);
-
-		// this will ensure that the user exists and is accessible
-		$filesRoot = $this->rootNode->getChild('files')->getChild($userId);
-
-		$fileView = new View('/' . $userId . '/files/');
-		$path = implode('/', $sections);
-
-		// check the path, also called when the path has been entered manually eg via a file explorer
-		if (\OC\Files\Filesystem::isForbiddenFileOrDir($path)) {
-			throw new \Sabre\DAV\Exception\Forbidden();
-		}
-
-		$path = trim($path, '/');
-
-		if (isset($this->cache[$path]) && $this->cache[$path] !== false) {
-			return $this->cache[$path];
-		}
-
-		if ($path) {
-			try {
-				$fileView->verifyPath($path, basename($path));
-			} catch (\OCP\Files\InvalidPathException $ex) {
-				throw new InvalidPath($ex->getMessage());
-			}
-		}
-
-		// check the path, also called when the path has been entered manually eg via a file explorer
-		if (\OC\Files\Filesystem::isForbiddenFileOrDir($path)) {
-			throw new \Sabre\DAV\Exception\Forbidden();
-		}
-
-		// Is it the root node?
-		if ($path === '') {
-			return $filesRoot;
-		}
-
-		// read from file cache
-		try {
-			$info = $fileView->getFileInfo($path);
-		} catch (StorageNotAvailableException $e) {
-			throw new \Sabre\DAV\Exception\ServiceUnavailable('Storage is temporarily not available', 0, $e);
-		} catch (StorageInvalidException $e) {
-			throw new \Sabre\DAV\Exception\NotFound('Storage ' . $path . ' is invalid');
-		} catch (LockedException $e) {
-			throw new \Sabre\DAV\Exception\Locked();
-		} catch (ForbiddenException $e) {
-			throw new \Sabre\DAV\Exception\Forbidden();
-		}
-
-		if (!$info) {
-			$this->cache[$path] = false;
-			throw new \Sabre\DAV\Exception\NotFound('File with name ' . $path . ' could not be located');
-		}
-
-		if ($info->getType() === 'dir') {
-			$node = new \OCA\DAV\Connector\Sabre\Directory($fileView, $info, $this);
-		} else {
-			$node = new \OCA\DAV\Connector\Sabre\File($fileView, $info);
-		}
-
-		$this->cache[$path] = $node;
-		return $node;
 
 	}
 }
